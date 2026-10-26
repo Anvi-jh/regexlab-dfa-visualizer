@@ -1,0 +1,14 @@
+@"
+.venv/
+venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+dist/
+.vite/
+"@ | Set-Content .gitignore
+# Local backup folder
+Regex_DFA_Visualizer_backup/
