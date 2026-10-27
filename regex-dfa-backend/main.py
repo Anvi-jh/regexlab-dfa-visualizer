@@ -41,12 +41,37 @@ class AutomataRequest(BaseModel):
     regex: str = Field(min_length=1, max_length=200)
     test_string: str = Field(default="", max_length=5000)
     dfa_mode: Literal["complete"] = "complete"
-    minimize: bool = False
+    minimize: bool = True
 
 
 def make_complete_dfa(dfa):
     """Compatibility wrapper around the shared core DFA completion helper."""
     return complete_dfa(dfa)
+
+
+
+def arc_hint(source_pos, target_pos, step):
+    """Tell the frontend whether an edge should be drawn as a curve.
+
+    Why this exists: states are placed on a grid/row. An edge that jumps over
+    a neighbour (D0 -> D2) or points backwards (D2 -> D1) would otherwise be a
+    straight line hidden underneath other edges and nodes.
+
+    Returns "above" (forward jump), "below" (any backward edge) or None
+    (a normal straight edge is fine).
+    """
+    if source_pos["y"] != target_pos["y"]:
+        return None  # different rows: the router already avoids overlap
+
+    dx = target_pos["x"] - source_pos["x"]
+
+    if dx == 0:
+        return None  # self-loop, handled by its own edge type
+    if dx < 0:
+        return "below"  # backward edge
+    if dx > step:
+        return "above"  # forward edge that skips at least one state
+    return None
 
 
 def build_nfa_graph(nfa):
@@ -70,6 +95,8 @@ def build_nfa_graph(nfa):
             },
         })
 
+    positions = {node["id"]: node["position"] for node in nodes}
+
     edge_number = 0
     for source, transitions in nfa.transitions.items():
         for chars, destination in transitions:
@@ -90,6 +117,13 @@ def build_nfa_graph(nfa):
                 "label": label,
                 "type": "smoothstep",
                 "animated": False,
+                "data": {
+                    "arc": arc_hint(
+                        positions[f"q{source}"],
+                        positions[f"q{destination}"],
+                        step=170,
+                    )
+                },
             })
             edge_number += 1
 
@@ -99,9 +133,13 @@ def build_nfa_graph(nfa):
 def build_dfa_graph(dfa):
     """Convert the DFA into React Flow nodes and grouped edges."""
     nodes = []
+    dead_state = dfa.get("dead_state")
+    normal_count = len(dfa["states"]) - (1 if dead_state is not None else 0)
+    # Put the dead state under the middle of the row, not at a fixed x.
+    dead_x = 80 + max(normal_count - 1, 0) * 220 // 2
 
     for state in range(len(dfa["states"])):
-        is_dead = bool(dfa.get("dead_state") == state)
+        is_dead = dead_state == state
         label = f"D{state}" + (" (dead)" if is_dead else "")
         nodes.append({
             "id": f"D{state}",
@@ -109,7 +147,7 @@ def build_dfa_graph(dfa):
             # Keep ordinary states in a horizontal row and place the
             # dead state clearly below the row so its incoming edges are visible.
             "position": (
-                {"x": 300, "y": 330}
+                {"x": dead_x, "y": 330}
                 if is_dead
                 else {"x": 80 + state * 220, "y": 100}
             ),
@@ -125,6 +163,8 @@ def build_dfa_graph(dfa):
     for source, transitions in dfa["transitions"].items():
         for symbol, destination in transitions.items():
             grouped_edges[(source, destination)].append(symbol)
+
+    positions = {node["id"]: node["position"] for node in nodes}
 
     edges = []
     for index, ((source, destination), symbols) in enumerate(
@@ -143,8 +183,22 @@ def build_dfa_graph(dfa):
             "source": f"D{source}",
             "target": f"D{destination}",
             "label": label,
-            "type": "smoothstep",
+            # Edges into the dead state use smooth curves so each one fans
+            # out from its own source instead of sharing one "bus" line.
+            "type": "default" if destination == dead_state else "smoothstep",
+            "style": (
+                {"strokeDasharray": "6 4", "opacity": 0.75}
+                if destination == dead_state
+                else {}
+            ),
             "animated": False,
+            "data": {
+                "arc": arc_hint(
+                    positions[f"D{source}"],
+                    positions[f"D{destination}"],
+                    step=220,
+                )
+            },
         })
 
     return {"nodes": nodes, "edges": edges}
@@ -168,18 +222,27 @@ def build_transition_table(dfa):
 
 
 def test_dfa_string(dfa, test_string):
-    """Test a string and return its execution path and transitions."""
+    """Run a string through the DFA and report every step.
+
+    A complete DFA never "gets stuck": a symbol with no listed transition
+    (including characters outside the regex's alphabet, like 'c' in a*b*)
+    sends the machine to the dead (trap) state, where it stays forever.
+    """
+    alphabet = set(dfa["alphabet"])
+    dead_state = dfa.get("dead_state")
+
     current_state = dfa["start_state"]
     path = [f"D{current_state}"]
     steps = []
-    rejected_early = False
+    stuck = False  # only possible when there is no dead state at all
 
     for position, character in enumerate(test_string, start=1):
         next_state = (
-            dfa["transitions"]
-            .get(current_state, {})
-            .get(character)
+            dfa["transitions"].get(current_state, {}).get(character)
         )
+
+        if next_state is None and dead_state is not None:
+            next_state = dead_state
 
         steps.append({
             "position": position,
@@ -188,27 +251,27 @@ def test_dfa_string(dfa, test_string):
             "next_state": (
                 f"D{next_state}" if next_state is not None else None
             ),
+            # Lets the UI explain *why* the string was rejected.
+            "in_alphabet": character in alphabet,
         })
 
         if next_state is None:
-            rejected_early = True
+            stuck = True
             break
 
         current_state = next_state
         path.append(f"D{current_state}")
 
-    accepted = (
-        not rejected_early
-        and current_state in dfa["accept_states"]
-    )
+    accepted = not stuck and current_state in dfa["accept_states"]
 
     return {
         "input": test_string,
         "accepted": accepted,
         "path": path,
         "steps": steps,
-        "final_state": (
-            f"D{current_state}" if not rejected_early else None
+        "final_state": f"D{current_state}" if not stuck else None,
+        "unknown_symbols": sorted(
+            {repr(c) for c in test_string if c not in alphabet}
         ),
     }
 

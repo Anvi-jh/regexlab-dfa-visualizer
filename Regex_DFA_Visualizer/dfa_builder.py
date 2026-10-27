@@ -4,13 +4,14 @@ from copy import deepcopy
 
 
 def epsilon_closure(nfa, states):
-    """Find states reachable using epsilon transitions."""
+    """Return all states reachable through epsilon transitions."""
     closure = set(states)
-    stack = list(states)
+    stack = list(closure)
 
     while stack:
         state = stack.pop()
-        for chars, destination in nfa.transitions[state]:
+
+        for chars, destination in nfa.transitions.get(state, []):
             if chars is None and destination not in closure:
                 closure.add(destination)
                 stack.append(destination)
@@ -19,11 +20,11 @@ def epsilon_closure(nfa, states):
 
 
 def move(nfa, states, symbol):
-    """Find states reachable after consuming one character."""
+    """Return NFA states reachable by consuming symbol."""
     result = set()
 
     for state in states:
-        for chars, destination in nfa.transitions[state]:
+        for chars, destination in nfa.transitions.get(state, []):
             if chars is not None and symbol in chars:
                 result.add(destination)
 
@@ -31,121 +32,178 @@ def move(nfa, states, symbol):
 
 
 def convert_nfa_to_dfa(nfa, minimize=True, max_states=1000):
-    """Convert an epsilon-NFA to a DFA with a strict state limit.
+    """Convert an epsilon-NFA to a DFA using subset construction."""
+    if max_states < 1:
+        raise ValueError("max_states must be at least 1.")
 
-    Set minimize=False to inspect the direct subset-construction result.
-    The returned DFA is partial; callers can complete it with a dead state.
-    """
     alphabet = sorted({
-        char
-        for transitions in nfa.transitions.values()
-        for chars, _ in transitions
+        symbol
+        for outgoing in nfa.transitions.values()
+        for chars, _ in outgoing
         if chars is not None
-        for char in chars
+        for symbol in chars
     })
 
     start = epsilon_closure(nfa, {nfa.start_state})
-    dfa_states = [start]
-    state_names = {start: 0}
-    dfa_transitions = {}
-    unprocessed = deque([start])
 
-    while unprocessed:
-        current = unprocessed.popleft()
-        current_name = state_names[current]
-        dfa_transitions[current_name] = {}
+    states = [start]
+    state_ids = {start: 0}
+    transitions = {}
+    queue = deque([start])
+
+    while queue:
+        current = queue.popleft()
+        current_id = state_ids[current]
+        transitions[current_id] = {}
 
         for symbol in alphabet:
             reachable = move(nfa, current, symbol)
+
             if not reachable:
                 continue
 
             target = epsilon_closure(nfa, reachable)
 
-            if target not in state_names:
-                if len(dfa_states) >= max_states:
+            if target not in state_ids:
+                if len(states) >= max_states:
                     raise ValueError(
-                        f"DFA construction exceeded the safety limit of {max_states} states. "
-                        "This expression is too complex to visualize safely; simplify it and try again."
+                        f"DFA construction exceeded the safety limit "
+                        f"of {max_states} states. Simplify the regex."
                     )
-                state_names[target] = len(dfa_states)
-                dfa_states.append(target)
-                unprocessed.append(target)
 
-            dfa_transitions[current_name][symbol] = state_names[target]
+                state_ids[target] = len(states)
+                states.append(target)
+                queue.append(target)
 
-    accept_states = {
-        state_names[state]
-        for state in dfa_states
-        if nfa.accept_state in state
+            transitions[current_id][symbol] = state_ids[target]
+
+    accepting = {
+        state_ids[subset]
+        for subset in states
+        if nfa.accept_state in subset
     }
 
-    original_dfa = {
+    dfa = {
         "alphabet": alphabet,
-        "states": dfa_states,
-        "state_names": state_names,
-        "transitions": dfa_transitions,
+        "states": states,
+        "state_names": {
+            subset: index for index, subset in enumerate(states)
+        },
+        "transitions": transitions,
         "start_state": 0,
-        "accept_states": accept_states,
+        "accept_states": accepting,
     }
 
-    return minimize_dfa(original_dfa) if minimize else original_dfa
+    return minimize_dfa(dfa) if minimize else dfa
 
 
 def minimize_dfa(dfa):
-    """Minimize a DFA using partition refinement.
-
-    Missing transitions are treated as transitions to an implicit
-    rejecting dead state. That state is omitted from the partial DFA.
-    """
-    alphabet = dfa["alphabet"]
-    states = dfa["states"]
+    """Minimize a DFA using partition refinement."""
+    alphabet = list(dfa["alphabet"])
+    states = list(dfa["states"])
     transitions = dfa["transitions"]
-    accepting = dfa["accept_states"]
+    accepting = set(dfa["accept_states"])
+    start = dfa["start_state"]
 
-    dead_state = len(states)
-    all_states = list(range(len(states) + 1))
+    if not states:
+        return {
+            "alphabet": alphabet,
+            "states": [],
+            "state_names": {},
+            "transitions": {},
+            "start_state": 0,
+            "accept_states": set(),
+        }
 
-    complete_transitions = {}
-    for state in all_states:
-        complete_transitions[state] = {}
+    if not 0 <= start < len(states):
+        raise ValueError("Invalid DFA start state.")
+
+    if any(not 0 <= state < len(states) for state in accepting):
+        raise ValueError("Invalid DFA accepting state.")
+
+    # Remove unreachable states before minimization.
+    reachable = set()
+    stack = [start]
+
+    while stack:
+        state = stack.pop()
+
+        if state in reachable:
+            continue
+
+        reachable.add(state)
+
         for symbol in alphabet:
-            if state == dead_state:
-                destination = dead_state
-            else:
-                destination = transitions.get(state, {}).get(symbol, dead_state)
-            complete_transitions[state][symbol] = destination
+            destination = transitions.get(state, {}).get(symbol)
 
-    non_accepting = [s for s in all_states if s not in accepting]
-    accepting_states = [s for s in all_states if s in accepting]
+            if destination is not None:
+                if not 0 <= destination < len(states):
+                    raise ValueError("Invalid DFA transition destination.")
+                if destination not in reachable:
+                    stack.append(destination)
+
+    original_states = sorted(reachable)
+    dead = len(states)
+    all_states = original_states + [dead]
+
+    # Complete the transition function with an implicit dead state.
+    complete = {}
+
+    for state in all_states:
+        complete[state] = {}
+
+        for symbol in alphabet:
+            if state == dead:
+                destination = dead
+            else:
+                destination = transitions.get(state, {}).get(symbol, dead)
+
+                if destination not in reachable:
+                    destination = dead
+
+            complete[state][symbol] = destination
+
+    non_accepting = [
+        state for state in all_states if state not in accepting
+    ]
+    accepting_groups = [
+        state for state in all_states if state in accepting
+    ]
+
     partitions = []
 
     if non_accepting:
         partitions.append(non_accepting)
-    if accepting_states:
-        partitions.append(accepting_states)
 
+    if accepting_groups:
+        partitions.append(accepting_groups)
+
+    # Split groups until every state in a group has equivalent behavior.
     while True:
         group_of = {
             state: index
             for index, group in enumerate(partitions)
             for state in group
         }
+
         refined = []
 
         for group in partitions:
-            signatures = {}
+            buckets = {}
+
             for state in group:
                 signature = tuple(
-                    group_of[complete_transitions[state][symbol]]
+                    group_of[complete[state][symbol]]
                     for symbol in alphabet
                 )
-                signatures.setdefault(signature, []).append(state)
-            refined.extend(signatures.values())
+                buckets.setdefault(signature, []).append(state)
+
+            refined.extend(buckets.values())
 
         if len(refined) == len(partitions):
             partitions = refined
             break
+
         partitions = refined
 
     group_of = {
@@ -154,38 +212,48 @@ def minimize_dfa(dfa):
         for state in group
     }
 
-    dead_group = group_of[dead_state]
-    start_group = group_of[dfa["start_state"]]
+    start_group = group_of[start]
+    dead_group = group_of[dead]
 
+    # Keep the start group even when the accepted language is empty.
     ordered_groups = [start_group]
     ordered_groups.extend(
-        i for i in range(len(partitions))
-        if i != start_group and i != dead_group
+        index
+        for index in range(len(partitions))
+        if index != start_group and index != dead_group
     )
-    new_id = {group: index for index, group in enumerate(ordered_groups)}
+
+    new_ids = {
+        group_index: index
+        for index, group_index in enumerate(ordered_groups)
+    }
 
     minimized_states = []
     minimized_transitions = {}
     minimized_accepting = set()
-    minimized_state_names = {}
+    minimized_names = {}
 
     for group_index in ordered_groups:
         members = [
-            state for state in partitions[group_index]
-            if state != dead_state
+            state
+            for state in partitions[group_index]
+            if state != dead
         ]
+
         if not members:
             continue
 
-        combined_subset = frozenset(
+        new_state = new_ids[group_index]
+
+        # Retain NFA subsets for the visualizer.
+        subset = frozenset(
             nfa_state
             for state in members
             for nfa_state in states[state]
         )
 
-        new_state = new_id[group_index]
-        minimized_states.append(combined_subset)
-        minimized_state_names[combined_subset] = new_state
+        minimized_states.append(subset)
+        minimized_names[subset] = new_state
 
         if any(state in accepting for state in members):
             minimized_accepting.add(new_state)
@@ -194,16 +262,22 @@ def minimize_dfa(dfa):
         minimized_transitions[new_state] = {}
 
         for symbol in alphabet:
-            destination = complete_transitions[representative][symbol]
+            destination = complete[representative][symbol]
             destination_group = group_of[destination]
 
-            if destination_group != dead_group and destination_group in new_id:
-                minimized_transitions[new_state][symbol] = new_id[destination_group]
+            # Missing transitions represent rejection in the partial DFA.
+            if destination_group == dead_group:
+                continue
+
+            if destination_group in new_ids:
+                minimized_transitions[new_state][symbol] = (
+                    new_ids[destination_group]
+                )
 
     return {
         "alphabet": alphabet,
         "states": minimized_states,
-        "state_names": minimized_state_names,
+        "state_names": minimized_names,
         "transitions": minimized_transitions,
         "start_state": 0,
         "accept_states": minimized_accepting,
@@ -211,37 +285,41 @@ def minimize_dfa(dfa):
 
 
 def complete_dfa(dfa):
-    """Return a complete DFA over its declared alphabet.
-
-    Missing transitions go to a rejecting dead state that loops to itself.
-    If the DFA is already complete, it is returned as a copy without adding
-    an unnecessary dead state.
-    """
+    """Return a complete DFA with an explicit dead state if required."""
     completed = deepcopy(dfa)
     alphabet = list(completed["alphabet"])
     states = completed["states"]
     transitions = completed["transitions"]
+
+    for state in range(len(states)):
+        transitions.setdefault(state, {})
+
     has_missing = any(
-        symbol not in transitions.get(state, {})
+        symbol not in transitions[state]
         for state in range(len(states))
         for symbol in alphabet
     )
+
     if not has_missing:
-        for state in range(len(states)):
-            transitions.setdefault(state, {})
         return completed
 
-    dead_state = len(states)
-    completed["dead_state"] = dead_state
-    transitions[dead_state] = {symbol: dead_state for symbol in alphabet}
-    for state in range(len(states)):
-        transitions.setdefault(state, {})
-        for symbol in alphabet:
-            transitions[state].setdefault(symbol, dead_state)
-    states.append(frozenset())
-    completed["state_names"] = {
-        state_set: index
-        for index, state_set in enumerate(states)
-        if state_set
+    dead = len(states)
+
+    transitions[dead] = {
+        symbol: dead for symbol in alphabet
     }
+
+    for state in range(len(states)):
+        for symbol in alphabet:
+            transitions[state].setdefault(symbol, dead)
+
+    states.append(frozenset())
+    completed["dead_state"] = dead
+
+    completed["state_names"] = {
+        subset: index
+        for index, subset in enumerate(states)
+        if subset
+    }
+
     return completed

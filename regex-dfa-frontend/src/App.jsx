@@ -1,5 +1,4 @@
-﻿
-import { useCallback, useState } from "react";
+﻿import { useCallback, useState } from "react";
 import axios from "axios";
 import {
   ReactFlow,
@@ -32,7 +31,6 @@ import {
   XCircle,
 } from "lucide-react";
 
-
 import "@xyflow/react/dist/style.css";
 import "./index.css";
 
@@ -42,7 +40,7 @@ function StateNode({ data }) {
   return (
     <div className={`state-node ${data.accepting ? "accepting" : ""}`}>
       <Handle type="target" position={Position.Left} />
-      {data.start && <span className="start-marker">â–¶</span>}
+      {data.start && <span className="start-marker">▶</span>}
       <span>{data.label}</span>
       {data.accepting && <div className="accepting-ring" />}
       <Handle type="source" position={Position.Right} />
@@ -54,7 +52,6 @@ const nodeTypes = { stateNode: StateNode };
 
 function cleanSymbol(symbol) {
   const value = String(symbol ?? "");
-  // Backend uses Python repr(), so a single character may arrive as "'a'".
   if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
     return value.slice(1, -1);
   }
@@ -71,7 +68,6 @@ function SelfLoopEdge({
   label,
   style,
 }) {
-  // Draw the loop above the state instead of routing an edge through the node.
   const lift = 68;
   const path = `M ${sourceX} ${sourceY} C ${sourceX + 55} ${sourceY - lift}, ${targetX - 55} ${targetY - lift}, ${targetX} ${targetY}`;
 
@@ -104,7 +100,64 @@ function SelfLoopEdge({
   );
 }
 
-const edgeTypes = { selfLoop: SelfLoopEdge };
+
+/**
+ * Draws an edge as a curve that bows above or below the row of states.
+ * The backend sets data.arc to "above" or "below" for edges that would
+ * otherwise be hidden under other edges (jumping over a state, or going
+ * backwards). The farther apart the states, the higher the curve.
+ */
+function ArcEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  markerEnd,
+  label,
+  style,
+  data,
+}) {
+  const direction = data?.arc === "below" ? 1 : -1; // SVG y grows downward
+  const distance = Math.abs(targetX - sourceX);
+  const height = Math.min(60 + distance * 0.22, 220);
+
+  const path = `M ${sourceX} ${sourceY} C ${sourceX + 40} ${sourceY + direction * height}, ${targetX - 40} ${targetY + direction * height}, ${targetX} ${targetY}`;
+
+  // A cubic curve with these control points peaks at 75% of `height`.
+  const labelX = (sourceX + targetX) / 2;
+  const labelY = (sourceY + targetY) / 2 + direction * height * 0.75;
+
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
+      {label ? (
+        <EdgeLabelRenderer>
+          <div
+            className="nodrag nopan"
+            style={{
+              position: "absolute",
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              pointerEvents: "none",
+              background: "#fffaf0",
+              border: "1px solid #eadfc8",
+              borderRadius: "6px",
+              padding: "2px 7px",
+              fontSize: "13px",
+              fontWeight: 600,
+              color: "#7d5555",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {cleanSymbol(label)}
+          </div>
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
+  );
+}
+
+const edgeTypes = { selfLoop: SelfLoopEdge, arc: ArcEdge };
 
 function graphForReactFlow(graph) {
   if (!graph) return { nodes: [], edges: [] };
@@ -116,7 +169,12 @@ function graphForReactFlow(graph) {
     })),
     edges: graph.edges.map((edge) => ({
       ...edge,
-      type: edge.source === edge.target ? "selfLoop" : edge.type,
+      type:
+        edge.source === edge.target
+          ? "selfLoop"
+          : edge.data?.arc
+            ? "arc"
+            : edge.type,
       label: cleanSymbol(edge.label),
       markerEnd: { type: MarkerType.ArrowClosed },
     })),
@@ -132,17 +190,19 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
-  const [minimizeDfa, setMinimizeDfa] = useState(false);
 
   const currentGraph = activeGraph === "NFA" ? result?.nfa : result?.dfa;
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
-  const displayGraph = useCallback((graph) => {
-    const converted = graphForReactFlow(graph);
-    setNodes(converted.nodes);
-    setEdges(converted.edges);
-  }, [setNodes, setEdges]);
+  const displayGraph = useCallback(
+    (graph) => {
+      const converted = graphForReactFlow(graph);
+      setNodes(converted.nodes);
+      setEdges(converted.edges);
+    },
+    [setNodes, setEdges]
+  );
 
   const buildAutomata = async () => {
     if (regex.length === 0) {
@@ -156,10 +216,10 @@ function App() {
 
     try {
       const response = await axios.post(`${API_URL}/automata`, {
-        regex: regex,
+        regex,
         test_string: testString,
         dfa_mode: "complete",
-        minimize: minimizeDfa,
+        minimize: true,
       });
 
       setResult(response.data);
@@ -182,8 +242,7 @@ function App() {
 
   const changeGraph = (nextGraph) => {
     setActiveGraph(nextGraph);
-    const graph = nextGraph === "NFA" ? result?.nfa : result?.dfa;
-    displayGraph(graph);
+    displayGraph(nextGraph === "NFA" ? result?.nfa : result?.dfa);
   };
 
   const resetGraph = () => {
@@ -198,6 +257,16 @@ function App() {
     setNodes([]);
     setEdges([]);
   };
+
+  const symbols = result
+    ? Array.from(
+        new Set(
+          result.transition_table.flatMap((row) =>
+            Object.keys(row.transitions)
+          )
+        )
+      )
+    : [];
 
   return (
     <div className="app-shell">
@@ -217,7 +286,11 @@ function App() {
         </div>
 
         <div className="topbar-actions">
-          <button className="icon-button" title="Toggle sidebar" onClick={() => setSidebarOpen(!sidebarOpen)}>
+          <button
+            className="icon-button"
+            title="Toggle sidebar"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
             <PanelLeftClose size={18} />
           </button>
           <div className="avatar">R</div>
@@ -247,9 +320,15 @@ function App() {
               />
               <span className="input-mark">.*</span>
             </div>
-            <p className="field-hint">Up to 200 characters. Anchors, backreferences, lazy quantifiers, and word boundaries are not supported.</p>
+            <p className="field-hint">
+              Up to 200 characters. Anchors, backreferences, lazy quantifiers,
+              and word boundaries are not supported.
+            </p>
 
-            <button className="guide-toggle" onClick={() => setShowGuide(!showGuide)}>
+            <button
+              className="guide-toggle"
+              onClick={() => setShowGuide(!showGuide)}
+            >
               <BookOpen size={16} />
               Regex syntax guide
               <ChevronDown className={showGuide ? "rotate" : ""} size={16} />
@@ -285,31 +364,23 @@ function App() {
               placeholder="Enter a string to test"
               spellCheck="false"
             />
-            <p className="field-hint">Check whether the string matches your pattern.</p>
-
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "9px",
-                margin: "12px 0 16px",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={minimizeDfa}
-                onChange={(event) => setMinimizeDfa(event.target.checked)}
-              />
-              Minimize DFA
-            </label>
+            <p className="field-hint">
+              Check whether the string matches your pattern.
+            </p>
 
             <div className="field-hint" style={{ marginBottom: "18px" }}>
-              A complete DFA is generated, including a dead state for missing transitions.
+              A minimized, complete DFA is generated, including a dead state
+              for missing transitions.
             </div>
 
-            <button className="primary-button" onClick={buildAutomata} disabled={loading}>
-              {loading ? <LoaderCircle size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
+            <button
+              className="primary-button"
+              onClick={buildAutomata}
+              disabled={loading}
+            >
+              {loading
+                ? <LoaderCircle size={17} className="spin" />
+                : <Play size={17} fill="currentColor" />}
               {loading ? "Building..." : "Build automata"}
               {!loading && <ArrowRight size={17} />}
             </button>
@@ -324,10 +395,13 @@ function App() {
                 <Sparkles size={17} />
                 <div>
                   <strong>Learning tip</strong>
-                  <p>Follow the states and transitions to understand how an automaton processes a string.</p>
+                  <p>
+                    Follow the states and transitions to understand how an
+                    automaton processes a string.
+                  </p>
                 </div>
               </div>
-              <div className="sidebar-footer">REGEXLAB Â· COMPILER DESIGN</div>
+              <div className="sidebar-footer">REGEXLAB · COMPILER DESIGN</div>
             </div>
           </aside>
         )}
@@ -353,9 +427,11 @@ function App() {
           <div className={`notice-bar ${error ? "notice-error" : ""}`}>
             {error ? <XCircle size={17} /> : <Info size={17} />}
             <span>
-              {error || (result
-                ? `Automata generated successfully for /${result.regex}/`
-                : "Enter a regex and select Build automata to generate real NFA and DFA diagrams.")}
+              {error || (
+                result
+                  ? `Minimized automata generated successfully for /${result.regex}/`
+                  : "Enter a regex and select Build automata to generate the NFA and minimized DFA."
+              )}
             </span>
           </div>
 
@@ -374,12 +450,12 @@ function App() {
                   onClick={() => changeGraph("DFA")}
                   disabled={!result}
                 >
-                  <GitBranch size={16} /> DFA
+                  <GitBranch size={16} /> Minimized DFA
                 </button>
               </div>
               <div className="canvas-tools">
                 <span className="canvas-label">
-                  {result ? `${activeGraph} Â· GENERATED` : "AWAITING GENERATION"}
+                  {result ? `${activeGraph} · GENERATED` : "AWAITING GENERATION"}
                 </span>
               </div>
             </div>
@@ -406,7 +482,9 @@ function App() {
                   <Background color="#E7DDB9" gap={22} size={1} />
                   <Controls />
                   <MiniMap
-                    nodeColor={(node) => node.data?.accepting ? "#B2E3D5" : "#DE7272"}
+                    nodeColor={(node) =>
+                      node.data?.accepting ? "#B2E3D5" : "#DE7272"
+                    }
                     maskColor="rgba(255, 245, 168, 0.5)"
                   />
                 </ReactFlow>
@@ -423,7 +501,7 @@ function App() {
               <div><span className="legend-circle start-legend" /> Start state</div>
               <div><span className="legend-circle" /> Regular state</div>
               <div><span className="legend-circle accepting-legend" /> Accepting state</div>
-              <div className="legend-note">Drag states Â· Scroll to zoom Â· Pan to explore</div>
+              <div className="legend-note">Drag states · Scroll to zoom · Pan to explore</div>
             </div>
           </section>
 
@@ -448,18 +526,22 @@ function App() {
                     {result.test.accepted ? <CheckCircle2 size={22} /> : <XCircle size={22} />}
                     <div>
                       <strong>{result.test.accepted ? "String ACCEPTED" : "String REJECTED"}</strong>
-                      <p>{result.test.accepted
-                        ? "The input matches the regular expression."
-                        : "The input does not match the regular expression."}</p>
+                      <p>
+                        {result.test.accepted
+                          ? "The input matches the regular expression."
+                          : "The input does not match the regular expression."}
+                      </p>
                     </div>
                   </div>
                   <div className="execution-path">
                     <span>EXECUTION PATH</span>
-                    <code>{result.test.path.join(" â†’ ") || "No states visited"}</code>
+                    <code>{result.test.path.join(" → ") || "No states visited"}</code>
                   </div>
                   <div className="steps-scroll">
                     <table>
-                      <thead><tr><th>#</th><th>Character</th><th>From</th><th>To</th></tr></thead>
+                      <thead>
+                        <tr><th>#</th><th>Character</th><th>From</th><th>To</th></tr>
+                      </thead>
                       <tbody>
                         {result.test.steps.map((step) => (
                           <tr key={step.position}>
@@ -480,7 +562,10 @@ function App() {
                 <div className="result-empty">
                   <div className="empty-icon"><Workflow size={22} /></div>
                   <strong>Ready to test your string</strong>
-                  <p>Generate the automata to see whether your input is accepted and follow its execution path.</p>
+                  <p>
+                    Generate the automata to see whether your input is accepted
+                    and follow its execution path.
+                  </p>
                 </div>
               )}
               <div className="execution-path">
@@ -493,10 +578,10 @@ function App() {
               <div className="card-heading">
                 <div className="card-title-icon yellow"><Table2 size={17} /></div>
                 <div>
-                  <h3>DFA transition table</h3>
+                  <h3>Minimized DFA transition table</h3>
                   <p>
                     {result
-                      ? `Complete DFA Â· Generated from your regex`
+                      ? "Complete transition table for the minimized DFA"
                       : "Appears after automata generation"}
                   </p>
                 </div>
@@ -507,13 +592,7 @@ function App() {
                     <thead>
                       <tr>
                         <th>State</th>
-                        {Array.from(
-                          new Set(
-                            result.transition_table.flatMap((row) =>
-                              Object.keys(row.transitions)
-                            )
-                          )
-                        ).map((symbol) => (
+                        {symbols.map((symbol) => (
                           <th key={symbol}>{cleanSymbol(symbol)}</th>
                         ))}
                         <th>Final</th>
@@ -526,18 +605,16 @@ function App() {
                             <span className="state-code">{row.state}</span>
                             {row.dead && <span className="dead-state-tag">Dead</span>}
                           </td>
-                          {Array.from(
-                            new Set(
-                              result.transition_table.flatMap((tableRow) =>
-                                Object.keys(tableRow.transitions)
-                              )
-                            )
-                          ).map((symbol) => (
-                            <td key={symbol}>{row.transitions[symbol] ?? "â€”"}</td>
+                          {symbols.map((symbol) => (
+                            <td key={symbol}>
+                              {row.transitions[symbol] ?? "—"}
+                            </td>
                           ))}
-                          <td>{row.accepting
-                            ? <span className="final-yes">Yes</span>
-                            : <span className="final-no">No</span>}</td>
+                          <td>
+                            {row.accepting
+                              ? <span className="final-yes">Yes</span>
+                              : <span className="final-no">No</span>}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -547,15 +624,18 @@ function App() {
                 <div className="result-empty">
                   <div className="empty-icon"><Table2 size={22} /></div>
                   <strong>No transition table yet</strong>
-                  <p>Your DFA transition table will be generated by the backend.</p>
+                  <p>Your minimized DFA transition table will appear here.</p>
                 </div>
               )}
             </section>
           </div>
 
           <footer className="workspace-footer">
-            <span><span className="footer-dot" /> {result ? "Connected to Python API" : "Waiting for generation"}</span>
-            <span>RegexLab Â· Built for learning automata</span>
+            <span>
+              <span className="footer-dot" />{" "}
+              {result ? "Connected to Python API" : "Waiting for generation"}
+            </span>
+            <span>RegexLab · Built for learning automata</span>
           </footer>
         </main>
       </div>
