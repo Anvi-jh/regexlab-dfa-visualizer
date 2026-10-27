@@ -3,7 +3,7 @@ from nfa_builder import build_simple_nfa
 from dfa_builder import convert_nfa_to_dfa
 
 
-def test_string(dfa, text):
+def is_string_accepted(dfa, text):
     current = dfa["start_state"]
 
     for char in text:
@@ -43,7 +43,7 @@ for regex, text, expected in tests:
     try:
         nfa = build_simple_nfa(regex)
         dfa = convert_nfa_to_dfa(nfa)
-        actual = test_string(dfa, text)
+        actual = is_string_accepted(dfa, text)
         passed = actual == expected
 
         print(

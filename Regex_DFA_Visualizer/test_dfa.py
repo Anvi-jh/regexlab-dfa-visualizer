@@ -5,7 +5,7 @@ from nfa_builder import build_simple_nfa
 from dfa_builder import convert_nfa_to_dfa
 
 
-def test_regex(regex, test_string):
+def is_regex_accepted(regex, test_string):
     """Build the automata and test a string using the DFA."""
     nfa = build_simple_nfa(regex)
     dfa = convert_nfa_to_dfa(nfa)
@@ -30,62 +30,62 @@ def test_regex(regex, test_string):
 class TestDFABuilder(unittest.TestCase):
 
     def test_simple_match(self):
-        self.assertTrue(test_regex("abc", "abc"))
+        self.assertTrue(is_regex_accepted("abc", "abc"))
 
     def test_simple_rejection(self):
-        self.assertFalse(test_regex("abc", "abd"))
+        self.assertFalse(is_regex_accepted("abc", "abd"))
 
     def test_alternation(self):
-        self.assertTrue(test_regex("a|b", "a"))
-        self.assertTrue(test_regex("a|b", "b"))
-        self.assertFalse(test_regex("a|b", "c"))
+        self.assertTrue(is_regex_accepted("a|b", "a"))
+        self.assertTrue(is_regex_accepted("a|b", "b"))
+        self.assertFalse(is_regex_accepted("a|b", "c"))
 
     def test_star(self):
-        self.assertTrue(test_regex("a*", ""))
-        self.assertTrue(test_regex("a*", "aaa"))
-        self.assertFalse(test_regex("a*", "b"))
+        self.assertTrue(is_regex_accepted("a*", ""))
+        self.assertTrue(is_regex_accepted("a*", "aaa"))
+        self.assertFalse(is_regex_accepted("a*", "b"))
 
     def test_plus(self):
-        self.assertTrue(test_regex("a+", "a"))
-        self.assertTrue(test_regex("a+", "aaa"))
-        self.assertFalse(test_regex("a+", ""))
+        self.assertTrue(is_regex_accepted("a+", "a"))
+        self.assertTrue(is_regex_accepted("a+", "aaa"))
+        self.assertFalse(is_regex_accepted("a+", ""))
 
     def test_optional(self):
-        self.assertTrue(test_regex("ab?", "a"))
-        self.assertTrue(test_regex("ab?", "ab"))
-        self.assertFalse(test_regex("ab?", "abb"))
+        self.assertTrue(is_regex_accepted("ab?", "a"))
+        self.assertTrue(is_regex_accepted("ab?", "ab"))
+        self.assertFalse(is_regex_accepted("ab?", "abb"))
 
     def test_grouping(self):
-        self.assertTrue(test_regex("(ab|cd)*", "abcd"))
-        self.assertTrue(test_regex("(ab|cd)*", ""))
-        self.assertFalse(test_regex("(ab|cd)*", "ac"))
+        self.assertTrue(is_regex_accepted("(ab|cd)*", "abcd"))
+        self.assertTrue(is_regex_accepted("(ab|cd)*", ""))
+        self.assertFalse(is_regex_accepted("(ab|cd)*", "ac"))
 
     def test_character_class(self):
-        self.assertTrue(test_regex("[a-c]+", "abc"))
-        self.assertFalse(test_regex("[a-c]+", "abd"))
+        self.assertTrue(is_regex_accepted("[a-c]+", "abc"))
+        self.assertFalse(is_regex_accepted("[a-c]+", "abd"))
 
     def test_digit_class(self):
-        self.assertTrue(test_regex("[0-9]+", "12345"))
-        self.assertFalse(test_regex("[0-9]+", "12a"))
+        self.assertTrue(is_regex_accepted("[0-9]+", "12345"))
+        self.assertFalse(is_regex_accepted("[0-9]+", "12a"))
 
     def test_wildcard(self):
-        self.assertTrue(test_regex("a.c", "abc"))
-        self.assertTrue(test_regex("a.c", "a7c"))
-        self.assertFalse(test_regex("a.c", "ac"))
+        self.assertTrue(is_regex_accepted("a.c", "abc"))
+        self.assertTrue(is_regex_accepted("a.c", "a7c"))
+        self.assertFalse(is_regex_accepted("a.c", "ac"))
 
     def test_escaped_character(self):
-        self.assertTrue(test_regex(r"a\*b", "a*b"))
-        self.assertFalse(test_regex(r"a\*b", "ab"))
+        self.assertTrue(is_regex_accepted(r"a\*b", "a*b"))
+        self.assertFalse(is_regex_accepted(r"a\*b", "ab"))
 
     def test_bounded_repetition(self):
-        self.assertTrue(test_regex("a{2,4}", "aa"))
-        self.assertTrue(test_regex("a{2,4}", "aaaa"))
-        self.assertFalse(test_regex("a{2,4}", "a"))
-        self.assertFalse(test_regex("a{2,4}", "aaaaa"))
+        self.assertTrue(is_regex_accepted("a{2,4}", "aa"))
+        self.assertTrue(is_regex_accepted("a{2,4}", "aaaa"))
+        self.assertFalse(is_regex_accepted("a{2,4}", "a"))
+        self.assertFalse(is_regex_accepted("a{2,4}", "aaaaa"))
 
     def test_negated_character_class(self):
-        self.assertTrue(test_regex("[^0-9]+", "hello"))
-        self.assertFalse(test_regex("[^0-9]+", "hello5"))
+        self.assertTrue(is_regex_accepted("[^0-9]+", "hello"))
+        self.assertFalse(is_regex_accepted("[^0-9]+", "hello5"))
 
 
 if __name__ == "__main__":

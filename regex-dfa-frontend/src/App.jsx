@@ -1,4 +1,4 @@
-
+﻿
 import { useCallback, useState } from "react";
 import axios from "axios";
 import {
@@ -31,6 +31,8 @@ import {
   LoaderCircle,
   XCircle,
 } from "lucide-react";
+
+
 import "@xyflow/react/dist/style.css";
 import "./index.css";
 
@@ -40,7 +42,7 @@ function StateNode({ data }) {
   return (
     <div className={`state-node ${data.accepting ? "accepting" : ""}`}>
       <Handle type="target" position={Position.Left} />
-      {data.start && <span className="start-marker">▶</span>}
+      {data.start && <span className="start-marker">â–¶</span>}
       <span>{data.label}</span>
       {data.accepting && <div className="accepting-ring" />}
       <Handle type="source" position={Position.Right} />
@@ -130,6 +132,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [minimizeDfa, setMinimizeDfa] = useState(false);
 
   const currentGraph = activeGraph === "NFA" ? result?.nfa : result?.dfa;
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -142,7 +145,7 @@ function App() {
   }, [setNodes, setEdges]);
 
   const buildAutomata = async () => {
-    if (!regex.trim()) {
+    if (regex.length === 0) {
       setError("Please enter a regular expression first.");
       setResult(null);
       return;
@@ -156,6 +159,7 @@ function App() {
         regex: regex,
         test_string: testString,
         dfa_mode: "complete",
+        minimize: minimizeDfa,
       });
 
       setResult(response.data);
@@ -236,13 +240,14 @@ function App() {
               <input
                 id="regex"
                 value={regex}
+                maxLength={200}
                 onChange={(event) => setRegex(event.target.value)}
                 placeholder="e.g. a(b|c)*"
                 spellCheck="false"
               />
               <span className="input-mark">.*</span>
             </div>
-            <p className="field-hint">Use regex syntax to define the language.</p>
+            <p className="field-hint">Up to 200 characters. Anchors, backreferences, lazy quantifiers, and word boundaries are not supported.</p>
 
             <button className="guide-toggle" onClick={() => setShowGuide(!showGuide)}>
               <BookOpen size={16} />
@@ -260,8 +265,11 @@ function App() {
                 <div><code>[a-z]</code><span>Character range</span></div>
                 <div><code>(ab)</code><span>Grouping</span></div>
                 <div><code>a{"{2,4}"}</code><span>Bounded repetition</span></div>
-                <div><code>\d+</code><span>Digits</span></div>
-                <div><code>.</code><span>Wildcard</span></div>
+                <div><code>\d+</code><span>ASCII digits</span></div>
+                <div><code>\D</code><span>Non-digits in the supported alphabet</span></div>
+                <div><code>\w</code> / <code>\W</code><span>Word / non-word characters</span></div>
+                <div><code>\s</code> / <code>\S</code><span>Whitespace / non-whitespace</span></div>
+                <div><code>.</code><span>Any supported character except newline</span></div>
               </div>
             )}
 
@@ -272,11 +280,29 @@ function App() {
               id="test-string"
               className="text-input"
               value={testString}
+              maxLength={5000}
               onChange={(event) => setTestString(event.target.value)}
               placeholder="Enter a string to test"
               spellCheck="false"
             />
             <p className="field-hint">Check whether the string matches your pattern.</p>
+
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "9px",
+                margin: "12px 0 16px",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={minimizeDfa}
+                onChange={(event) => setMinimizeDfa(event.target.checked)}
+              />
+              Minimize DFA
+            </label>
 
             <div className="field-hint" style={{ marginBottom: "18px" }}>
               A complete DFA is generated, including a dead state for missing transitions.
@@ -301,7 +327,7 @@ function App() {
                   <p>Follow the states and transitions to understand how an automaton processes a string.</p>
                 </div>
               </div>
-              <div className="sidebar-footer">REGEXLAB · COMPILER DESIGN</div>
+              <div className="sidebar-footer">REGEXLAB Â· COMPILER DESIGN</div>
             </div>
           </aside>
         )}
@@ -353,7 +379,7 @@ function App() {
               </div>
               <div className="canvas-tools">
                 <span className="canvas-label">
-                  {result ? `${activeGraph} · GENERATED` : "AWAITING GENERATION"}
+                  {result ? `${activeGraph} Â· GENERATED` : "AWAITING GENERATION"}
                 </span>
               </div>
             </div>
@@ -397,7 +423,7 @@ function App() {
               <div><span className="legend-circle start-legend" /> Start state</div>
               <div><span className="legend-circle" /> Regular state</div>
               <div><span className="legend-circle accepting-legend" /> Accepting state</div>
-              <div className="legend-note">Drag states · Scroll to zoom · Pan to explore</div>
+              <div className="legend-note">Drag states Â· Scroll to zoom Â· Pan to explore</div>
             </div>
           </section>
 
@@ -429,7 +455,7 @@ function App() {
                   </div>
                   <div className="execution-path">
                     <span>EXECUTION PATH</span>
-                    <code>{result.test.path.join(" → ") || "No states visited"}</code>
+                    <code>{result.test.path.join(" â†’ ") || "No states visited"}</code>
                   </div>
                   <div className="steps-scroll">
                     <table>
@@ -470,7 +496,7 @@ function App() {
                   <h3>DFA transition table</h3>
                   <p>
                     {result
-                      ? `Complete DFA · Generated from your regex`
+                      ? `Complete DFA Â· Generated from your regex`
                       : "Appears after automata generation"}
                   </p>
                 </div>
@@ -487,7 +513,7 @@ function App() {
                               Object.keys(row.transitions)
                             )
                           )
-                        ).slice(0, 8).map((symbol) => (
+                        ).map((symbol) => (
                           <th key={symbol}>{cleanSymbol(symbol)}</th>
                         ))}
                         <th>Final</th>
@@ -506,8 +532,8 @@ function App() {
                                 Object.keys(tableRow.transitions)
                               )
                             )
-                          ).slice(0, 8).map((symbol) => (
-                            <td key={symbol}>{row.transitions[symbol] ?? "—"}</td>
+                          ).map((symbol) => (
+                            <td key={symbol}>{row.transitions[symbol] ?? "â€”"}</td>
                           ))}
                           <td>{row.accepting
                             ? <span className="final-yes">Yes</span>
@@ -529,7 +555,7 @@ function App() {
 
           <footer className="workspace-footer">
             <span><span className="footer-dot" /> {result ? "Connected to Python API" : "Waiting for generation"}</span>
-            <span>RegexLab · Built for learning automata</span>
+            <span>RegexLab Â· Built for learning automata</span>
           </footer>
         </main>
       </div>
@@ -538,3 +564,4 @@ function App() {
 }
 
 export default App;
+
