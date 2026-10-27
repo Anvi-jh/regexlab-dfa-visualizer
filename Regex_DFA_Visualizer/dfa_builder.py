@@ -1,8 +1,4 @@
 
-from collections import deque
-from copy import deepcopy
-
-
 def epsilon_closure(nfa, states):
     """Find states reachable using epsilon transitions."""
     closure = set(states)
@@ -30,12 +26,8 @@ def move(nfa, states, symbol):
     return result
 
 
-def convert_nfa_to_dfa(nfa, minimize=True, max_states=1000):
-    """Convert an epsilon-NFA to a DFA with a strict state limit.
-
-    Set minimize=False to inspect the direct subset-construction result.
-    The returned DFA is partial; callers can complete it with a dead state.
-    """
+def convert_nfa_to_dfa(nfa):
+    """Convert an epsilon-NFA to a minimized partial DFA."""
     alphabet = sorted({
         char
         for transitions in nfa.transitions.values()
@@ -48,10 +40,10 @@ def convert_nfa_to_dfa(nfa, minimize=True, max_states=1000):
     dfa_states = [start]
     state_names = {start: 0}
     dfa_transitions = {}
-    unprocessed = deque([start])
+    unprocessed = [start]
 
     while unprocessed:
-        current = unprocessed.popleft()
+        current = unprocessed.pop(0)
         current_name = state_names[current]
         dfa_transitions[current_name] = {}
 
@@ -63,11 +55,6 @@ def convert_nfa_to_dfa(nfa, minimize=True, max_states=1000):
             target = epsilon_closure(nfa, reachable)
 
             if target not in state_names:
-                if len(dfa_states) >= max_states:
-                    raise ValueError(
-                        f"DFA construction exceeded the safety limit of {max_states} states. "
-                        "This expression is too complex to visualize safely; simplify it and try again."
-                    )
                 state_names[target] = len(dfa_states)
                 dfa_states.append(target)
                 unprocessed.append(target)
@@ -89,7 +76,7 @@ def convert_nfa_to_dfa(nfa, minimize=True, max_states=1000):
         "accept_states": accept_states,
     }
 
-    return minimize_dfa(original_dfa) if minimize else original_dfa
+    return minimize_dfa(original_dfa)
 
 
 def minimize_dfa(dfa):
@@ -208,40 +195,3 @@ def minimize_dfa(dfa):
         "start_state": 0,
         "accept_states": minimized_accepting,
     }
-
-
-def complete_dfa(dfa):
-    """Return a complete DFA over its declared alphabet.
-
-    Missing transitions go to a rejecting dead state that loops to itself.
-    If the DFA is already complete, it is returned as a copy without adding
-    an unnecessary dead state.
-    """
-    completed = deepcopy(dfa)
-    alphabet = list(completed["alphabet"])
-    states = completed["states"]
-    transitions = completed["transitions"]
-    has_missing = any(
-        symbol not in transitions.get(state, {})
-        for state in range(len(states))
-        for symbol in alphabet
-    )
-    if not has_missing:
-        for state in range(len(states)):
-            transitions.setdefault(state, {})
-        return completed
-
-    dead_state = len(states)
-    completed["dead_state"] = dead_state
-    transitions[dead_state] = {symbol: dead_state for symbol in alphabet}
-    for state in range(len(states)):
-        transitions.setdefault(state, {})
-        for symbol in alphabet:
-            transitions[state].setdefault(symbol, dead_state)
-    states.append(frozenset())
-    completed["state_names"] = {
-        state_set: index
-        for index, state_set in enumerate(states)
-        if state_set
-    }
-    return completed

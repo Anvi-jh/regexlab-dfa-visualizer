@@ -1,8 +1,7 @@
 from pathlib import Path
-import logging
 import sys
-from typing import Literal
 from collections import defaultdict
+from copy import deepcopy
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,10 +13,8 @@ AUTOMATA_DIR = PROJECT_ROOT / "Regex_DFA_Visualizer"
 sys.path.insert(0, str(AUTOMATA_DIR))
 
 from nfa_builder import build_simple_nfa
-from dfa_builder import convert_nfa_to_dfa, complete_dfa
+from dfa_builder import convert_nfa_to_dfa
 
-
-logger = logging.getLogger("regexlab.api")
 
 app = FastAPI(
     title="RegexLab API",
@@ -40,13 +37,52 @@ app.add_middleware(
 class AutomataRequest(BaseModel):
     regex: str = Field(min_length=1, max_length=200)
     test_string: str = Field(default="", max_length=5000)
-    dfa_mode: Literal["complete"] = "complete"
-    minimize: bool = False
 
 
 def make_complete_dfa(dfa):
-    """Compatibility wrapper around the shared core DFA completion helper."""
-    return complete_dfa(dfa)
+    """Return a complete DFA, adding a rejecting dead state if needed."""
+    completed = deepcopy(dfa)
+    alphabet = list(completed["alphabet"])
+    states = completed["states"]
+    transitions = completed["transitions"]
+    dead_state = len(states)
+
+    has_missing_transition = any(
+        symbol not in transitions.get(state, {})
+        for state in range(len(states))
+        for symbol in alphabet
+    )
+
+    # If every state already has every transition, no dead state is needed.
+    if not has_missing_transition:
+        for state in range(len(states)):
+            transitions.setdefault(state, {})
+            for symbol in alphabet:
+                # Existing transitions are already present.
+                transitions[state][symbol] = transitions[state][symbol]
+        return completed
+
+    # Record the dead state so the graph and table can identify it.
+    completed["dead_state"] = dead_state
+
+    # A dead state loops to itself for every symbol.
+    transitions[dead_state] = {symbol: dead_state for symbol in alphabet}
+
+    # Route every missing transition to the dead state.
+    for state in range(len(states)):
+        transitions.setdefault(state, {})
+        for symbol in alphabet:
+            if symbol not in transitions[state]:
+                transitions[state][symbol] = dead_state
+
+    # Keep the dead state visible in the state list and non-accepting.
+    completed["states"].append(frozenset())
+    completed["state_names"] = {
+        state_set: index
+        for index, state_set in enumerate(completed["states"])
+        if state_set
+    }
+    return completed
 
 
 def build_nfa_graph(nfa):
@@ -76,8 +112,7 @@ def build_nfa_graph(nfa):
             if chars is None:
                 label = "ε"
             elif len(chars) == 1:
-                only_char = next(iter(chars))
-                label = only_char if only_char.isprintable() else repr(only_char)
+                label = next(iter(chars))
             elif len(chars) > 30:
                 label = f"{len(chars)} characters"
             else:
@@ -134,7 +169,7 @@ def build_dfa_graph(dfa):
             label = f"{len(symbols)} characters"
         else:
             label = ", ".join(
-                symbol if symbol.isprintable() else repr(symbol)
+                "ε" if symbol == "" else str(symbol)
                 for symbol in sorted(symbols)
             )
 
@@ -221,16 +256,14 @@ def health_check():
 @app.post("/api/automata")
 def create_automata(request: AutomataRequest):
     try:
-        if request.regex == "":
+        if not request.regex.strip():
             raise HTTPException(
                 status_code=422,
-                detail="Please enter a regular expression. A single space is a valid literal pattern.",
+                detail="Please enter a regular expression.",
             )
 
         nfa = build_simple_nfa(request.regex)
-        # Subset construction is the default so students can see the direct
-        # NFA-to-DFA result. Minimization remains available as an API option.
-        dfa = convert_nfa_to_dfa(nfa, minimize=request.minimize, max_states=1000)
+        dfa = convert_nfa_to_dfa(nfa)
 
         # RegexLab always builds a complete DFA; no partial mode is exposed.
         dfa = make_complete_dfa(dfa)
@@ -252,9 +285,7 @@ def create_automata(request: AutomataRequest):
             detail=f"Invalid regular expression: {error}",
         ) from error
     except Exception as error:
-        # Keep implementation details in server logs, not in public responses.
-        logger.exception("Unexpected error while generating automata")
         raise HTTPException(
             status_code=500,
-            detail="Automata generation failed unexpectedly. Please try a simpler expression.",
+            detail=f"Automata generation failed: {error}",
         ) from error
