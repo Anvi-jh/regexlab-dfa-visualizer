@@ -1,0 +1,103 @@
+[1mdiff --git a/Regex_DFA_Visualizer/dfa_builder.py b/Regex_DFA_Visualizer/dfa_builder.py[m
+[1mindex 47d8b9e..282f80d 100644[m
+[1m--- a/Regex_DFA_Visualizer/dfa_builder.py[m
+[1m+++ b/Regex_DFA_Visualizer/dfa_builder.py[m
+[36m@@ -1,4 +1,8 @@[m
+ [m
+[32m+[m[32mfrom collections import deque[m
+[32m+[m[32mfrom copy import deepcopy[m
+[32m+[m
+[32m+[m
+ def epsilon_closure(nfa, states):[m
+     """Find states reachable using epsilon transitions."""[m
+     closure = set(states)[m
+[36m@@ -26,8 +30,12 @@[m [mdef move(nfa, states, symbol):[m
+     return result[m
+ [m
+ [m
+[31m-def convert_nfa_to_dfa(nfa):[m
+[31m-    """Convert an epsilon-NFA to a minimized partial DFA."""[m
+[32m+[m[32mdef convert_nfa_to_dfa(nfa, minimize=True, max_states=1000):[m
+[32m+[m[32m    """Convert an epsilon-NFA to a DFA with a strict state limit.[m
+[32m+[m
+[32m+[m[32m    Set minimize=False to inspect the direct subset-construction result.[m
+[32m+[m[32m    The returned DFA is partial; callers can complete it with a dead state.[m
+[32m+[m[32m    """[m
+     alphabet = sorted({[m
+         char[m
+         for transitions in nfa.transitions.values()[m
+[36m@@ -40,10 +48,10 @@[m [mdef convert_nfa_to_dfa(nfa):[m
+     dfa_states = [start][m
+     state_names = {start: 0}[m
+     dfa_transitions = {}[m
+[31m-    unprocessed = [start][m
+[32m+[m[32m    unprocessed = deque([start])[m
+ [m
+     while unprocessed:[m
+[31m-        current = unprocessed.pop(0)[m
+[32m+[m[32m        current = unprocessed.popleft()[m
+         current_name = state_names[current][m
+         dfa_transitions[current_name] = {}[m
+ [m
+[36m@@ -55,6 +63,11 @@[m [mdef convert_nfa_to_dfa(nfa):[m
+             target = epsilon_closure(nfa, reachable)[m
+ [m
+             if target not in state_names:[m
+[32m+[m[32m                if len(dfa_states) >= max_states:[m
+[32m+[m[32m                    raise ValueError([m
+[32m+[m[32m                        f"DFA construction exceeded the safety limit of {max_states} states. "[m
+[32m+[m[32m                        "This expression is too complex to visualize safely; simplify it and try again."[m
+[32m+[m[32m                    )[m
+                 state_names[target] = len(dfa_states)[m
+                 dfa_states.append(target)[m
+                 unprocessed.append(target)[m
+[36m@@ -76,7 +89,7 @@[m [mdef convert_nfa_to_dfa(nfa):[m
+         "accept_states": accept_states,[m
+     }[m
+ [m
+[31m-    return minimize_dfa(original_dfa)[m
+[32m+[m[32m    return minimize_dfa(original_dfa) if minimize else original_dfa[m
+ [m
+ [m
+ def minimize_dfa(dfa):[m
+[36m@@ -195,3 +208,40 @@[m [mdef minimize_dfa(dfa):[m
+         "start_state": 0,[m
+         "accept_states": minimized_accepting,[m
+     }[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef complete_dfa(dfa):[m
+[32m+[m[32m    """Return a complete DFA over its declared alphabet.[m
+[32m+[m
+[32m+[m[32m    Missing transitions go to a rejecting dead state that loops to itself.[m
+[32m+[m[32m    If the DFA is already complete, it is returned as a copy without adding[m
+[32m+[m[32m    an unnecessary dead state.[m
+[32m+[m[32m    """[m
+[32m+[m[32m    completed = deepcopy(dfa)[m
+[32m+[m[32m    alphabet = list(completed["alphabet"])[m
+[32m+[m[32m    states = completed["states"][m
+[32m+[m[32m    transitions = completed["transitions"][m
+[32m+[m[32m    has_missing = any([m
+[32m+[m[32m        symbol not in transitions.get(state, {})[m
+[32m+[m[32m        for state in range(len(states))[m
+[32m+[m[32m        for symbol in alphabet[m
+[32m+[m[32m    )[m
+[32m+[m[32m    if not has_missing:[m
+[32m+[m[32m        for state in range(len(states)):[m
+[32m+[m[32m            transitions.setdefault(state, {})[m
+[32m+[m[32m        return completed[m
+[32m+[m
+[32m+[m[32m    dead_state = len(states)[m
+[32m+[m[32m    completed["dead_state"] = dead_state[m
+[32m+[m[32m    transitions[dead_state] = {symbol: dead_state for symbol in alphabet}[m
+[32m+[m[32m    for state in range(len(states)):[m
+[32m+[m[32m        transitions.setdefault(state, {})[m
+[32m+[m[32m        for symbol in alphabet:[m
+[32m+[m[32m            transitions[state].setdefault(symbol, dead_state)[m
+[32m+[m[32m    states.append(frozenset())[m
+[32m+[m[32m    completed["state_names"] = {[m
+[32m+[m[32m        state_set: index[m
+[32m+[m[32m        for index, state_set in enumerate(states)[m
+[32m+[m[32m        if state_set[m
+[32m+[m[32m    }[m
+[32m+[m[32m    return completed[m

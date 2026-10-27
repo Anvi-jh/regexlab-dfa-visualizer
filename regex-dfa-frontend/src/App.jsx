@@ -142,7 +142,7 @@ function App() {
   }, [setNodes, setEdges]);
 
   const buildAutomata = async () => {
-    if (!regex.trim()) {
+    if (regex.length === 0) {
       setError("Please enter a regular expression first.");
       setResult(null);
       return;
@@ -236,13 +236,14 @@ function App() {
               <input
                 id="regex"
                 value={regex}
+                maxLength={200}
                 onChange={(event) => setRegex(event.target.value)}
                 placeholder="e.g. a(b|c)*"
                 spellCheck="false"
               />
               <span className="input-mark">.*</span>
             </div>
-            <p className="field-hint">Use regex syntax to define the language.</p>
+            <p className="field-hint">Up to 200 characters. Anchors, backreferences, lazy quantifiers, and word boundaries are not supported.</p>
 
             <button className="guide-toggle" onClick={() => setShowGuide(!showGuide)}>
               <BookOpen size={16} />
@@ -260,8 +261,11 @@ function App() {
                 <div><code>[a-z]</code><span>Character range</span></div>
                 <div><code>(ab)</code><span>Grouping</span></div>
                 <div><code>a{"{2,4}"}</code><span>Bounded repetition</span></div>
-                <div><code>\d+</code><span>Digits</span></div>
-                <div><code>.</code><span>Wildcard</span></div>
+                <div><code>\d+</code><span>ASCII digits</span></div>
+                <div><code>\D</code><span>Non-digits in the supported alphabet</span></div>
+                <div><code>\w</code> / <code>\W</code><span>Word / non-word characters</span></div>
+                <div><code>\s</code> / <code>\S</code><span>Whitespace / non-whitespace</span></div>
+                <div><code>.</code><span>Any supported character except newline</span></div>
               </div>
             )}
 
@@ -272,6 +276,7 @@ function App() {
               id="test-string"
               className="text-input"
               value={testString}
+              maxLength={5000}
               onChange={(event) => setTestString(event.target.value)}
               placeholder="Enter a string to test"
               spellCheck="false"

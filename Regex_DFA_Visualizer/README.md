@@ -1,153 +1,83 @@
+# RegexLab — Regex-to-DFA Visualizer
 
-# Regex-to-DFA Visualizer
+RegexLab demonstrates Thompson NFA construction and subset construction to a DFA. The Streamlit app uses the core Python modules directly; the React app calls the FastAPI backend.
 
-## 1. Project Overview
+## Supported syntax
 
-The Regex-to-DFA Visualizer is a Python-based application that demonstrates how a regular expression can be converted into a Non-deterministic Finite Automaton (NFA) and then into a Deterministic Finite Automaton (DFA).
+- Concatenation: `ab`
+- Alternation: `a|b`
+- Grouping: `(ab)`
+- Repetition: `a*`, `a+`, `a?`, `{m}`, `{m,n}`
+- Character classes and ranges: `[abc]`, `[a-z]`, `[^0-9]`
+- Shorthand classes: `\d`, `\D`, `\w`, `\W`, `\s`, `\S`
+- Escaped punctuation and control/hex escapes: `\*`, `\n`, `\t`, `\x41`, `\u00E9`
+- Wildcard: `.` (except CR/LF)
 
-The application also allows users to test input strings and check whether they are accepted by the given regular expression.
+The parser deliberately rejects unsupported syntax rather than guessing. Unsupported constructs include anchors `^`/`$`, word boundaries `\b`/`\B`, backreferences, open-ended bounded repetitions such as `{2,}`, lazy/possessive quantifiers, and unknown alphabetic escapes. To match a punctuation character literally, escape it where needed.
 
-The project uses Python for the automata logic and Streamlit for the web interface. Graphviz is used to generate visual diagrams of the automata.
+## Alphabet semantics and Unicode note
 
-## 2. Objectives
+To keep the DFA finite and suitable for visualization, the alphabet is ASCII plus non-ASCII literal characters explicitly present in the pattern. Unicode literals such as `é` work. The implementation does **not** claim full Python `re` Unicode semantics for wildcard or negated classes: characters outside the declared finite alphabet are not represented by the DFA. This is an explicit limitation, not silent full-Unicode compatibility.
 
-- Understand regular expressions and finite automata.
-- Convert regular expressions into NFAs.
-- Convert NFAs into DFAs using subset construction.
-- Display NFA and DFA diagrams.
-- Generate a DFA transition table.
-- Test strings and display acceptance or rejection.
-- Show the sequence of DFA states followed during testing.
-- Demonstrate important concepts from Compiler Design.
+## Safety limits
 
-## 3. Technologies Used
+- Regex length: 200 characters
+- Syntax tree nodes: 1,500
+- NFA states: 5,000
+- DFA states: 1,000 in the conversion used by the API
+- Bounded repetition maximum: 100
+- Character range size: 10,001 code points
 
-- Python: Implements the main logic.
-- Streamlit: Provides the web application interface.
-- Graphviz: Generates automata diagrams.
-- Python unittest: Tests the functionality.
+Exceeding a limit returns a controlled error instead of allowing unbounded state growth.
 
-## 4. Project Workflow
+## Run the Streamlit version
 
-1. The user enters a regular expression.
-2. The application parses the expression.
-3. Thompson's construction is used to build an NFA.
-4. Subset construction converts the NFA into a DFA.
-5. Graphviz generates the NFA and DFA diagrams.
-6. The application displays the DFA transition table.
-7. The user enters a string to test.
-8. The DFA processes the characters one by one.
-9. The application displays whether the string is accepted or rejected.
-
-## 5. Main Files
-
-- app.py: Main Streamlit application.
-- nfa_builder.py: Regular-expression parsing and NFA construction.
-- dfa_builder.py: NFA-to-DFA conversion.
-- automata_visualizer.py: Automata diagram generation.
-- test_nfa.py: NFA-related tests.
-- test_dfa.py: DFA-related tests.
-- test_visualizer.py: Visualization tests.
-- check_dfa.py: Diagnostic checks for DFA behaviour.
-
-## 6. Supported Regular Expression Features
-
-The implementation supports the following features:
-
-- Concatenation, such as `ab`
-- Alternation, such as `a|b`
-- Grouping, such as `(ab|cd)`
-- Kleene star, such as `a*`
-- One-or-more repetition, such as `a+`
-- Optional expressions, such as `ab?`
-- Character classes, such as `[abc]`
-- Character ranges, such as `[a-z]`
-- Negated character classes, such as `[^0-9]`
-- Wildcard, such as `a.c`
-- Bounded repetition, such as `a{2,4}`
-- Supported escaped characters, such as `\d` and `\s`
-
-This is a simplified educational implementation and does not support every feature of commercial regular-expression engines.
-
-## 7. Installation Requirements
-
-Install Python and Graphviz before running the application.
-
-Install the required Python packages in the project's virtual environment:
-
-```powershell
-python -m pip install streamlit graphviz
-```
-
-The Graphviz executable must also be installed and accessible to the application.
-
-## 8. Running the Application
-
-Open PowerShell in the project root directory:
+From `C:\CompilerDesignProjects`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m streamlit run .\Regex_DFA_Visualizer\app.py
 ```
 
-Open the local URL printed by Streamlit in your browser.
+## Run the React + FastAPI version
 
-## 9. Testing
-
-Run the DFA tests:
+Backend terminal:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s .\Regex_DFA_Visualizer -p "test_dfa.py" -v
+cd C:\CompilerDesignProjects
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --app-dir .\regex-dfa-backend --port 8000
 ```
 
-Run all discoverable test files:
+Frontend terminal:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s .\Regex_DFA_Visualizer -v
+cd C:\CompilerDesignProjects\regex-dfa-frontend
+npm run dev
 ```
 
-The existing test runs have shown that the 13 DFA test cases pass and that the 17 NFA acceptance cases pass. Run the commands again whenever the code changes.
+- Frontend: `http://localhost:5173`
+- API docs: `http://127.0.0.1:8000/docs`
 
-## 10. Example
+## Run tests
 
-Regular expression:
+Core tests (PowerShell terminal):
 
-```text
-a(b|c)*
+```powershell
+cd C:\CompilerDesignProjects\Regex_DFA_Visualizer
+..\.venv\Scripts\python.exe -m unittest -v test_dfa.py test_regex_safety.py
+..\.venv\Scripts\python.exe test_nfa.py
 ```
 
-Input string:
+Backend/API tests:
 
-```text
-abcb
+```powershell
+cd C:\CompilerDesignProjects\regex-dfa-backend
+..\.venv\Scripts\python.exe -m unittest -v test_api.py
 ```
 
-Expected result:
+Frontend checks:
 
-```text
-ACCEPTED
+```powershell
+cd C:\CompilerDesignProjects\regex-dfa-frontend
+npm run build
+npm run lint
 ```
-
-The expression allows an `a` followed by zero or more occurrences of either `b` or `c`.
-
-For example, `a`, `ab`, `ac`, and `abcb` match this expression, while `bc` does not.
-
-## 11. Limitations
-
-- The parser supports a defined subset of regular-expression syntax.
-- Advanced features such as lookarounds and backreferences are not implemented.
-- The supported character universe is limited by the current implementation.
-- Large expressions may produce large automata and diagrams.
-- This project is designed for learning and demonstration rather than production-scale regex processing.
-
-## 12. Future Improvements
-
-- Improve the visual design and usability.
-- Make large diagrams easier to explore.
-- Add more automated tests and edge cases.
-- Improve error messages and validation.
-- Add downloadable diagrams and transition tables.
-- Provide clearer explanations of each conversion step.
-
-## 13. Conclusion
-
-The Regex-to-DFA Visualizer demonstrates the relationship between regular expressions, NFAs, and DFAs. It provides visual diagrams, transition tables, and string testing to help students understand finite automata and their role in Compiler Design.

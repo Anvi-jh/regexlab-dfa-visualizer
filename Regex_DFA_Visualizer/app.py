@@ -2,7 +2,7 @@
 import streamlit as st
 
 from nfa_builder import build_simple_nfa
-from dfa_builder import convert_nfa_to_dfa
+from dfa_builder import convert_nfa_to_dfa, complete_dfa
 from automata_visualizer import (
     create_nfa_diagram,
     create_dfa_diagram,
@@ -61,7 +61,7 @@ test_string = st.text_input(
 )
 
 if st.button("Build Automata and Test", type="primary"):
-    if not regex.strip():
+    if regex == "":
         st.warning(
             "Please enter a regular expression before building the automata."
         )
@@ -73,7 +73,7 @@ if st.button("Build Automata and Test", type="primary"):
         try:
             with st.spinner("Building NFA and DFA..."):
                 nfa = build_simple_nfa(regex)
-                dfa = convert_nfa_to_dfa(nfa)
+                dfa = complete_dfa(convert_nfa_to_dfa(nfa, minimize=False))
 
             st.success("NFA and DFA created successfully.")
 
